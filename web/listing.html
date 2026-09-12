@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — Listing</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <p id="error" class="error-message" hidden></p>
+    <div id="listing" class="card" style="max-width:640px;"></div>
+
+    <p class="muted" style="margin-top:0.75rem;">
+      <span class="live-dot" id="live-dot"></span>
+      <span id="live-status">Live availability: connecting…</span>
+    </p>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ws.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const listingId = params.get("id");
+
+    async function loadListing() {
+      const container = document.getElementById("listing");
+      const errorBox = document.getElementById("error");
+      try {
+        const item = await GearShare.getListing(listingId);
+        container.innerHTML = `
+          <h1>${item.title}</h1>
+          <div class="meta">${item.category_name} · listed by ${item.owner_name}</div>
+          <div class="meta">★ ${item.avg_rating.toFixed(1)} (${item.review_count} reviews)</div>
+          <p class="price">$${(item.price_per_day_cents / 100).toFixed(2)} / day · $${(item.deposit_cents / 100).toFixed(2)} deposit</p>
+          <a href="booking.html?listing_id=${item.listing_id}"><button>Book this gear</button></a>
+        `;
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+      }
+    }
+
+    loadListing();
+
+    // Real-time availability over WebSocket (internal/realtime/websocket.go,
+    // GET /ws/listings/{id}) — see web/js/ws.js. Falls back silently if the
+    // backend doesn't have the realtime layer wired yet (Phase 2).
+    GearShareWS.watchListingAvailability(listingId, {
+      onOpen: () => setLiveStatus(true, "Live availability: connected"),
+      onMessage: (msg) => setLiveStatus(true, "Live availability: " + msg),
+      onClose: () => setLiveStatus(false, "Live availability: disconnected"),
+      onError: () => setLiveStatus(false, "Live availability: unavailable"),
+    });
+
+    function setLiveStatus(on, text) {
+      document.getElementById("live-dot").classList.toggle("on", on);
+      document.getElementById("live-status").textContent = text;
+    }
+  </script>
+</body>
+</html>

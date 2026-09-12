@@ -1,0 +1,11 @@
+.env
+*.local.env
+bin/
+tmp/
+*.log
+.DS_Store
+deployments/nginx/certs/*.pem
+deployments/nginx/certs/*.key
+deployments/nginx/certs/*.crt
+internal/db/sqlc/*.go
+coverage.out

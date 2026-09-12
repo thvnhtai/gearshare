@@ -1,0 +1,191 @@
+name: gearshare
+
+services:
+  mysql-primary:
+    image: mysql:8.4
+    container_name: gearshare-mysql-primary
+    command: --server-id=1 --log-bin=mysql-bin --binlog-format=ROW --gtid-mode=ON --enforce-gtid-consistency=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: gearshare
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Read replica for the primary/replica scaling pattern (docs/adr/0002-cap-tradeoffs.md).
+  # Bootstrapped by scripts/mysql-replication-setup.sh; listing search/feed reads
+  # route here via internal/db/mysql.go's primary/replica router.
+  mysql-replica:
+    image: mysql:8.4
+    container_name: gearshare-mysql-replica
+    command: --server-id=2 --log-bin=mysql-bin --binlog-format=ROW --gtid-mode=ON --enforce-gtid-consistency=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - "3307:3306"
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gearshare-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    container_name: gearshare-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: gearshare-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: gearshare-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://127.0.0.1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: gearshare-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672" # management UI
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    container_name: gearshare-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: gearshare-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318"   # OTLP HTTP
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: gearshare-prometheus
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: gearshare-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.api
+    container_name: gearshare-api
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      MYSQL_PRIMARY_DSN: "gearshare_app:app_password@tcp(mysql-primary:3306)/gearshare?parseTime=true&multiStatements=true"
+      MYSQL_REPLICA_DSN: "gearshare_app:app_password@tcp(mysql-replica:3306)/gearshare?parseTime=true&multiStatements=true"
+      REDIS_ADDR: "redis:6379"
+      MONGO_URI: "mongodb://mongo:27017"
+      KAFKA_BROKERS: "kafka:29092"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      ELASTICSEARCH_ADDR: "http://elasticsearch:9200"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "jaeger:4318"
+      CORS_ORIGIN: "http://localhost:8081"
+      JWT_SECRET: "dev-only-change-me"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.notification
+    container_name: gearshare-notification-service
+    depends_on:
+      - rabbitmq
+      - api
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      GRPC_ADDR: ":9091"
+
+  search-indexer:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.indexer
+    container_name: gearshare-search-indexer
+    depends_on:
+      - kafka
+      - elasticsearch
+    environment:
+      KAFKA_BROKERS: "kafka:29092"
+      ELASTICSEARCH_ADDR: "http://elasticsearch:9200"
+      GRPC_ADDR: ":9092"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: gearshare-nginx
+    depends_on:
+      - api
+    ports:
+      - "443:443"
+      - "8081:80"
+    volumes:
+      - ./deployments/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deployments/nginx/certs:/etc/nginx/certs:ro
+      - ./web:/usr/share/nginx/html:ro
+
+volumes:
+  mysql-primary-data:
+  mongo-data:

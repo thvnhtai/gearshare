@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package gearshare.v1;
+
+option go_package = "github.com/thvnhtai/gearshare/api/gen/gearshare/v1;gearsharev1";
+
+// UserInternalService is implemented by the monolith (cmd/api) and called
+// by notification-service so notification payloads never need to carry PII
+// (email, display name) themselves — the queue message carries only a
+// user_id, and the consumer resolves contact details just-in-time.
+service UserInternalService {
+  rpc GetUserContact(GetUserContactRequest) returns (UserContact);
+}
+
+message GetUserContactRequest {
+  int64 user_id = 1;
+}
+
+message UserContact {
+  int64 user_id = 1;
+  string display_name = 2;
+  string email = 3;
+}

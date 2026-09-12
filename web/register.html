@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — Sign Up</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <div class="card" style="max-width:460px;">
+      <h1>Create your account</h1>
+      <p id="error" class="error-message" hidden></p>
+      <form class="stack" id="register-form">
+        <div>
+          <label for="display_name">Display name</label>
+          <input id="display_name" required />
+        </div>
+        <div>
+          <label for="email">Email</label>
+          <input id="email" type="email" required />
+        </div>
+        <div>
+          <label for="password">Password (min 8 characters)</label>
+          <input id="password" type="password" minlength="8" required />
+        </div>
+        <div>
+          <label for="role">I want to</label>
+          <select id="role">
+            <option value="renter">Rent gear</option>
+            <option value="owner">List my own gear</option>
+          </select>
+        </div>
+        <button type="submit">Create account</button>
+      </form>
+      <p class="muted">Already have an account? <a href="login.html">Log in</a></p>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    document.getElementById("register-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = document.getElementById("error");
+      errorBox.hidden = true;
+      try {
+        const result = await GearShare.register(
+          document.getElementById("email").value,
+          document.getElementById("password").value,
+          document.getElementById("display_name").value,
+          document.getElementById("role").value
+        );
+        GearShare.setSession(result.access_token, result.user);
+        window.location.href = "index.html";
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

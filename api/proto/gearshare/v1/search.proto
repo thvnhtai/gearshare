@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package gearshare.v1;
+
+import "gearshare/v1/common.proto";
+
+option go_package = "github.com/thvnhtai/gearshare/api/gen/gearshare/v1;gearsharev1";
+
+// SearchInternalService is implemented by search-indexer and called by the
+// monolith's listing-feed path (behind a circuit breaker, with a MySQL
+// LIKE-query fallback — see internal/search/fallback_mysql.go).
+service SearchInternalService {
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc IndexListing(IndexListingRequest) returns (Ack);
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 limit = 2;
+}
+
+message SearchResult {
+  int64 listing_id = 1;
+  string title = 2;
+  int64 price_per_day_cents = 3;
+  string category_name = 4;
+  double avg_rating = 5;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+// Ack is defined in common.proto.
+
+message IndexListingRequest {
+  int64 listing_id = 1;
+  string title = 2;
+  string description = 3;
+  int64 price_per_day_cents = 4;
+  string category_name = 5;
+  string owner_name = 6;
+  string status = 7;
+}

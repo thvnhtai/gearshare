@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — Browse Gear</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <div class="section-title">
+      <h1>Browse gear</h1>
+      <select id="category-filter">
+        <option value="">All categories</option>
+      </select>
+    </div>
+
+    <p id="error" class="error-message" hidden></p>
+    <div id="listings" class="grid"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    async function loadCategories() {
+      try {
+        const cats = await GearShare.listCategories();
+        const select = document.getElementById("category-filter");
+        cats.forEach((c) => {
+          const opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = c.name;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        console.error("failed to load categories", err);
+      }
+    }
+
+    function renderListing(item) {
+      const card = document.createElement("a");
+      card.href = `listing.html?id=${item.listing_id}`;
+      card.className = "card listing-card";
+      card.style.textDecoration = "none";
+      card.style.color = "inherit";
+      card.innerHTML = `
+        <h3>${item.title}</h3>
+        <div class="meta">${item.category_name} · listed by ${item.owner_name}</div>
+        <div class="meta">★ ${item.avg_rating.toFixed(1)} (${item.review_count} reviews)</div>
+        <div class="price">$${(item.price_per_day_cents / 100).toFixed(2)} / day</div>
+      `;
+      return card;
+    }
+
+    async function loadListings() {
+      const container = document.getElementById("listings");
+      const errorBox = document.getElementById("error");
+      try {
+        // GET /api/v1/listings is served by the JOIN-optimized feed query
+        // (internal/listing/query_optimized.go) with ETag/Cache-Control
+        // headers — a repeat load within 30s can come back as a 304.
+        const items = await GearShare.listListings(40, 0);
+        container.innerHTML = "";
+        if (!items || items.length === 0) {
+          container.innerHTML = '<p class="muted">No gear listed yet. <a href="register.html">Sign up as an owner</a> to list something.</p>';
+          return;
+        }
+        items.forEach((item) => container.appendChild(renderListing(item)));
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+      }
+    }
+
+    loadCategories();
+    loadListings();
+  </script>
+</body>
+</html>

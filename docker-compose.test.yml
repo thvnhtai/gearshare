@@ -1,0 +1,26 @@
+name: gearshare-test
+
+# Minimal, isolated stack for integration tests (go test -tags=integration ./...)
+# and CI. Separate ports/volumes from docker-compose.yml so both can run at once.
+services:
+  mysql-test:
+    image: mysql:8.4
+    container_name: gearshare-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: gearshare_test
+    ports:
+      - "3406:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_password"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: gearshare-redis-test
+    ports:
+      - "6479:6379"

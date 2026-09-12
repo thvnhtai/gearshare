@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package gearshare.v1;
+
+option go_package = "github.com/thvnhtai/gearshare/api/gen/gearshare/v1;gearsharev1";
+
+message Ack {
+  bool ok = 1;
+}

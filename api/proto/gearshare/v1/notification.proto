@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package gearshare.v1;
+
+import "gearshare/v1/common.proto";
+
+option go_package = "github.com/thvnhtai/gearshare/api/gen/gearshare/v1;gearsharev1";
+
+// NotificationService is implemented by notification-service. Called
+// synchronously by the monolith for urgent/real-time nudges, complementing
+// the async RabbitMQ queue (notifications.email) used for bulk email.
+service NotificationService {
+  rpc SendTransactional(SendTransactionalRequest) returns (Ack);
+}
+
+message SendTransactionalRequest {
+  int64 user_id = 1;
+  string template = 2; // e.g. "booking_approved", "booking_disputed"
+  map<string, string> data = 3;
+}

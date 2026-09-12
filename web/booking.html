@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — Book Gear</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <div class="card" style="max-width:460px;">
+      <h1>Request a booking</h1>
+      <p id="listing-summary" class="muted"></p>
+      <p id="error" class="error-message" hidden></p>
+      <p id="success" class="badge approved" hidden></p>
+
+      <form class="stack" id="booking-form">
+        <div>
+          <label for="start_date">Start date</label>
+          <input id="start_date" type="date" required />
+        </div>
+        <div>
+          <label for="end_date">End date</label>
+          <input id="end_date" type="date" required />
+        </div>
+        <button type="submit">Request booking</button>
+      </form>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    GearShareAuth.requireAuth();
+
+    const params = new URLSearchParams(window.location.search);
+    const listingId = params.get("listing_id");
+
+    async function loadSummary() {
+      try {
+        const item = await GearShare.getListing(listingId);
+        document.getElementById("listing-summary").textContent =
+          `${item.title} — $${(item.price_per_day_cents / 100).toFixed(2)}/day`;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    loadSummary();
+
+    document.getElementById("booking-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = document.getElementById("error");
+      const successBox = document.getElementById("success");
+      errorBox.hidden = true;
+      successBox.hidden = true;
+      try {
+        const booking = await GearShare.createBooking(
+          Number(listingId),
+          document.getElementById("start_date").value,
+          document.getElementById("end_date").value
+        );
+        successBox.textContent = `Booking #${booking.id} requested — total $${(booking.total_price_cents / 100).toFixed(2)}. Waiting on owner approval.`;
+        successBox.hidden = false;
+        document.getElementById("booking-form").reset();
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

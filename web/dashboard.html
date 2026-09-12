@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — Owner Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <div class="section-title">
+      <h1>Your bookings</h1>
+      <span class="muted"><span class="live-dot" id="live-dot"></span><span id="live-status">connecting…</span></span>
+    </div>
+    <p id="error" class="error-message" hidden></p>
+    <div id="bookings" class="grid"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/sse.js"></script>
+  <script src="js/polling.js"></script>
+  <script>
+    GearShareAuth.requireAuth();
+
+    const bookingsById = new Map();
+
+    function setLiveStatus(on, text) {
+      document.getElementById("live-dot").classList.toggle("on", on);
+      document.getElementById("live-status").textContent = text;
+    }
+
+    function renderBooking(b) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.id = `booking-${b.id}`;
+      card.innerHTML = `
+        <div class="section-title">
+          <strong>Booking #${b.id}</strong>
+          <span class="badge ${b.status}">${b.status}</span>
+        </div>
+        <div class="meta">Listing #${b.listing_id} · ${b.start_date} → ${b.end_date}</div>
+        <div class="price">$${(b.total_price_cents / 100).toFixed(2)}</div>
+        ${b.status === "requested" ? `
+          <div style="margin-top:0.6rem;display:flex;gap:0.5rem;">
+            <button onclick="approve(${b.id})">Approve</button>
+            <button class="danger" onclick="reject(${b.id})">Reject</button>
+          </div>` : ""}
+      `;
+      return card;
+    }
+
+    function upsertBooking(b) {
+      bookingsById.set(b.id, b);
+      const container = document.getElementById("bookings");
+      const existing = document.getElementById(`booking-${b.id}`);
+      const card = renderBooking(b);
+      if (existing) existing.replaceWith(card);
+      else container.prepend(card);
+    }
+
+    async function approve(id) {
+      try { upsertBooking(await GearShare.approveBooking(id)); } catch (err) { alert(err.message); }
+    }
+    async function reject(id) {
+      try { upsertBooking(await GearShare.rejectBooking(id)); } catch (err) { alert(err.message); }
+    }
+
+    async function loadInitialBookings() {
+      try {
+        const bookings = await GearShare.listMyBookings();
+        bookings.forEach(upsertBooking);
+      } catch (err) {
+        document.getElementById("error").textContent = err.message;
+        document.getElementById("error").hidden = false;
+      }
+    }
+    loadInitialBookings();
+
+    // Real-time: SSE is the primary transport (internal/realtime/sse.go).
+    // If EventSource itself isn't available in this browser, fall back to
+    // long-polling per booking (internal/realtime/polling.go) — the
+    // requirement checklist's "long/short polling" fallback path.
+    if (window.EventSource) {
+      GearShareSSE.watchBookingEvents({
+        onOpen: () => setLiveStatus(true, "live"),
+        onUpdate: (b) => upsertBooking(b),
+        onError: () => setLiveStatus(false, "reconnecting…"),
+      });
+    } else {
+      setLiveStatus(false, "polling (no SSE support)");
+      bookingsById.forEach((_, id) => GearSharePolling.pollBooking(id, { onUpdate: upsertBooking }));
+    }
+  </script>
+</body>
+</html>
