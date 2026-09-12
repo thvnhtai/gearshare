@@ -68,6 +68,19 @@ func (r *Repository) UpdateStatus(ctx context.Context, id int64, to Status) erro
 	return nil
 }
 
+// ListRecent backs the cookie-session admin dashboard
+// (internal/app/admin.go) — a platform-wide view, unlike ListForOwner's
+// per-owner scope, appropriate for an internal admin's vantage point.
+func (r *Repository) ListRecent(ctx context.Context, limit int) ([]Booking, error) {
+	var bookings []Booking
+	const q = `SELECT id, listing_id, renter_id, start_date, end_date, status, total_price_cents, created_at, updated_at
+	           FROM bookings ORDER BY created_at DESC LIMIT ?`
+	if err := r.db.Reader().SelectContext(ctx, &bookings, q, limit); err != nil {
+		return nil, fmt.Errorf("booking: list recent: %w", err)
+	}
+	return bookings, nil
+}
+
 // ListForOwner backs the SSE owner-dashboard feed (internal/realtime/sse.go).
 func (r *Repository) ListForOwner(ctx context.Context, ownerID int64) ([]Booking, error) {
 	var bookings []Booking

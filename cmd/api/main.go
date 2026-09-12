@@ -24,6 +24,8 @@ import (
 	"github.com/thvnhtai/gearshare/internal/eventbus"
 	"github.com/thvnhtai/gearshare/internal/listing"
 	appmiddleware "github.com/thvnhtai/gearshare/internal/middleware"
+	"github.com/thvnhtai/gearshare/internal/observability"
+	"github.com/thvnhtai/gearshare/internal/partner"
 	"github.com/thvnhtai/gearshare/internal/queue"
 	"github.com/thvnhtai/gearshare/internal/realtime"
 	"github.com/thvnhtai/gearshare/internal/review"
@@ -44,6 +46,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	shutdownTracing, err := observability.SetupTracing(context.Background(), cfg.OTel)
+	if err != nil {
+		log.Printf("observability: tracing setup failed, continuing without it: %v", err)
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdownCtx)
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	database, err := db.Connect(ctx, cfg.MySQL)
@@ -132,6 +145,49 @@ func main() {
 	}
 	searchService := search.NewService(searchGRPCClient, search.NewFallbackMySQL(database), appmiddleware.NewBreaker("search-indexer"))
 
+	// --- Cookie-session admin dashboard + API-key partner auth (the
+	// remaining two of the seven auth styles wired into the monolith) ---
+	secureCookies := cfg.Env == "production"
+	sessionManager := auth.NewSessionManager(cfg.Auth.SessionSecret, 12*time.Hour)
+	apiKeyRepo := auth.NewAPIKeyRepository(database)
+	apiKeyManager := auth.NewAPIKeyManager(cfg.Auth.APIKeyPepper)
+	adminHandler := app.NewAdminHandler(sessionManager, userRepo, bcryptHasher, bookingRepo, secureCookies)
+	partnerHandler := partner.NewHandler()
+
+	// OAuth2 + OIDC "Log in with Google" — optional at boot like Redis/Kafka/
+	// RabbitMQ above. NewOIDCVerifier does an OIDC discovery HTTP call, so
+	// it's skipped entirely (not just given a short timeout) when no client
+	// ID is configured, rather than slowing every boot down for a feature
+	// most local dev runs won't exercise.
+	var oauthHandler *user.OAuthHandler
+	if cfg.Auth.OAuthGoogleClientID != "" {
+		oidcCtx, oidcCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		oidcVerifier, err := auth.NewOIDCVerifier(oidcCtx, cfg.Auth.OAuthGoogleClientID)
+		oidcCancel()
+		if err != nil {
+			log.Printf("oauth: OIDC discovery failed, Google login disabled: %v", err)
+		} else {
+			googleOAuth := auth.NewGoogleOAuth(cfg.Auth.OAuthGoogleClientID, cfg.Auth.OAuthGoogleClientSecret, cfg.Auth.OAuthGoogleRedirectURL)
+			oauthHandler = user.NewOAuthHandler(googleOAuth, oidcVerifier, database, userRepo, jwtIssuer, secureCookies, cfg.HTTP.CORSOrigins[0])
+		}
+	}
+
+	// SAML SSO — optional, same pattern. Skipped entirely unless a real
+	// IdP metadata URL is configured (see internal/auth/saml.go).
+	var samlSP *auth.SAMLServiceProvider
+	if cfg.Auth.SAMLIDPMetadataURL != "" {
+		key, cert, err := auth.GenerateSelfSignedCert()
+		if err != nil {
+			log.Printf("saml: could not generate SP certificate, SAML disabled: %v", err)
+		} else {
+			samlSP, err = auth.NewSAMLServiceProvider("https://localhost", cfg.Auth.SAMLIDPMetadataURL, cert, key)
+			if err != nil {
+				log.Printf("saml: could not set up service provider, SAML disabled: %v", err)
+				samlSP = nil
+			}
+		}
+	}
+
 	// --- Real-time hub (SSE + WebSocket + long-poll; see internal/realtime) ---
 	hub := realtime.NewHub()
 	sseHandler := realtime.NewSSEHandler(hub, jwtIssuer)
@@ -149,6 +205,10 @@ func main() {
 		WS:       wsHandler,
 		Polling:  pollingHandler,
 		Search:   searchService.Handler,
+		Admin:    adminHandler,
+		Partner:  partnerHandler,
+		OAuth:    oauthHandler,
+		SAML:     samlSP,
 	}
 
 	router := app.NewRouter(handlers, app.RouterConfig{
@@ -156,6 +216,9 @@ func main() {
 		JWTIssuer:         jwtIssuer,
 		InternalBasicUser: envOrDefault("INTERNAL_BASIC_USER", "admin"),
 		InternalBasicPass: envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me"),
+		Sessions:          sessionManager,
+		APIKeyRepo:        apiKeyRepo,
+		APIKeyManager:     apiKeyManager,
 	})
 
 	server := app.NewServer(router, cfg.HTTP)

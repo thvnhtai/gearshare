@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GearShare Admin — Dashboard</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #f7f5f2; padding: 2rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e2e0d8; font-size: 0.9rem; }
+    th { background: #f0efe9; }
+    form.logout { display: inline; }
+    button { padding: 0.4rem 0.9rem; border: 1px solid #b3401f; color: #b3401f; background: none; border-radius: 6px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h2>Recent bookings (cookie-session admin view)</h2>
+    <form class="logout" method="POST" action="/admin/logout">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button type="submit">Log out</button>
+    </form>
+  </div>
+  <table>
+    <thead><tr><th>ID</th><th>Listing</th><th>Renter</th><th>Status</th><th>Total</th></tr></thead>
+    <tbody>
+      {{range .Bookings}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.ListingID}}</td>
+        <td>{{.RenterID}}</td>
+        <td>{{.Status}}</td>
+        <td>${{.TotalPriceDollars}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="5">No bookings yet.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</body>
+</html>

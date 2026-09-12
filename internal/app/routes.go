@@ -15,8 +15,11 @@ import (
 	"github.com/thvnhtai/gearshare/internal/booking"
 	"github.com/thvnhtai/gearshare/internal/category"
 	"github.com/thvnhtai/gearshare/internal/health"
+	"github.com/thvnhtai/gearshare/internal/httputil"
+	"github.com/thvnhtai/gearshare/internal/observability"
 	"github.com/thvnhtai/gearshare/internal/listing"
 	appmiddleware "github.com/thvnhtai/gearshare/internal/middleware"
+	"github.com/thvnhtai/gearshare/internal/partner"
 	"github.com/thvnhtai/gearshare/internal/realtime"
 	"github.com/thvnhtai/gearshare/internal/review"
 	"github.com/thvnhtai/gearshare/internal/user"
@@ -34,13 +37,20 @@ type Handlers struct {
 	WS       *realtime.WebSocketHandler
 	Polling  *realtime.PollingHandler
 	Search   http.HandlerFunc
+	Admin    *AdminHandler
+	Partner  *partner.Handler
+	OAuth    *user.OAuthHandler // nil when OAuth2/OIDC isn't configured (no client ID/secret)
+	SAML     *auth.SAMLServiceProvider // nil when no IdP metadata URL is configured
 }
 
 type RouterConfig struct {
-	CORSOrigins    []string
-	JWTIssuer      *auth.JWTIssuer
+	CORSOrigins       []string
+	JWTIssuer         *auth.JWTIssuer
 	InternalBasicUser string
 	InternalBasicPass string
+	Sessions          *auth.SessionManager
+	APIKeyRepo        *auth.APIKeyRepository
+	APIKeyManager     *auth.APIKeyManager
 }
 
 func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
@@ -52,8 +62,10 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 	r.Use(appmiddleware.CSP)
 	r.Use(appmiddleware.CORS(cfg.CORSOrigins))
+	r.Use(observability.HTTPMiddleware)
 
 	r.Get("/healthz", health.Handler)
+	r.Handle("/metrics", observability.Handler())
 
 	// Auth-rate-limited: 20 attempts/minute/IP guards login/register against
 	// brute force without punishing normal usage.
@@ -61,6 +73,10 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 		authRoutes.Use(appmiddleware.RateLimit(20, time.Minute))
 		authRoutes.Post("/register", h.User.Register)
 		authRoutes.Post("/login", h.User.Login)
+		if h.OAuth != nil {
+			authRoutes.Get("/oauth/google", h.OAuth.Start)
+			authRoutes.Get("/oauth/google/callback", h.OAuth.Callback)
+		}
 	})
 
 	r.Route("/api/v1", func(v1 chi.Router) {
@@ -99,6 +115,44 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	// needs the Upgrade/Connection headers that a plain HTTP proxy_pass
 	// location doesn't set.
 	r.Get("/ws/listings/{id}", h.WS.ListingAvailability)
+
+	// Partner/integration API — Token/API-Key auth, a distinct style from
+	// both JWT (frontend) and cookie sessions (admin dashboard): no login
+	// flow, no session, just a long-lived revocable key.
+	r.Route("/partner/v1", func(p chi.Router) {
+		p.Use(auth.RequireAPIKey(cfg.APIKeyRepo, cfg.APIKeyManager))
+		p.Get("/listings", h.Listing.Feed)
+		p.Post("/webhooks/insurance", h.Partner.InsuranceWebhook)
+	})
+
+	// Cookie session + CSRF admin dashboard — a classic server-rendered
+	// surface, the auth style that actually needs CSRF protection (the
+	// JSON API above doesn't send credentials via cookies, so it isn't
+	// exposed to the same attack).
+	r.Route("/admin", func(admin chi.Router) {
+		admin.Get("/login", h.Admin.LoginForm)
+		admin.With(auth.RequireCSRF).Post("/login", h.Admin.Login)
+		admin.Route("/dashboard", func(dash chi.Router) {
+			dash.Use(cfg.Sessions.RequireSession)
+			dash.Get("/", h.Admin.Dashboard)
+		})
+		admin.With(cfg.Sessions.RequireSession, auth.RequireCSRF).Post("/logout", h.Admin.Logout)
+	})
+
+	// SAML SSO for the fictitious B2B business portal — the seventh and
+	// last auth style. Registered only when an IdP is actually configured;
+	// see internal/auth/saml.go's doc comment for why this repo doesn't
+	// wire up a live third-party IdP by default.
+	if h.SAML != nil {
+		r.Get("/saml/metadata", h.SAML.MetadataHandler().ServeHTTP)
+		r.Post("/saml/acs", h.SAML.ACSHandler().ServeHTTP)
+		r.Route("/business/admin", func(business chi.Router) {
+			business.Use(h.SAML.RequireSession)
+			business.Get("/login", func(w http.ResponseWriter, r *http.Request) {
+				httputil.JSON(w, http.StatusOK, map[string]string{"status": "authenticated via SAML"})
+			})
+		})
+	}
 
 	// Internal/operational endpoints use Basic Auth — a deliberately
 	// different auth style from the public API (see internal/auth/middleware.go).
