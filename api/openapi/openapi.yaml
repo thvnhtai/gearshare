@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: GearShare API
+  version: "1.0.0"
+  description: >
+    Public REST API for the GearShare peer-to-peer gear rental marketplace.
+    See docs/architecture.md for the full endpoint inventory, including the
+    partner (API-key), admin (cookie+CSRF), and SAML surfaces this spec
+    does not cover — OpenAPI describes the JSON API only.
+servers:
+  - url: https://localhost/api/v1
+    description: Local dev via Nginx (deployments/nginx/nginx.conf)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        role: { type: string, enum: [renter, owner, admin] }
+    AuthResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+    Listing:
+      type: object
+      properties:
+        listing_id: { type: integer, format: int64 }
+        title: { type: string }
+        price_per_day_cents: { type: integer }
+        deposit_cents: { type: integer }
+        owner_id: { type: integer, format: int64 }
+        owner_name: { type: string }
+        category_id: { type: integer, format: int64 }
+        category_name: { type: string }
+        review_count: { type: integer }
+        avg_rating: { type: number, format: double }
+    Booking:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        listing_id: { type: integer, format: int64 }
+        renter_id: { type: integer, format: int64 }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        status:
+          type: string
+          enum: [requested, approved, rejected, active, completed, cancelled, disputed]
+        total_price_cents: { type: integer }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user (renter or owner) and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, display_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                display_name: { type: string }
+                role: { type: string, enum: [renter, owner] }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/login:
+    post:
+      summary: Log in with email/password and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /listings:
+    get:
+      summary: Browse active listings (JOIN-optimized feed; cache-aside + ETag)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Listing" }
+    post:
+      summary: Create a listing (owner only)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, price_per_day_cents]
+              properties:
+                category_id: { type: integer, format: int64 }
+                title: { type: string }
+                description: { type: string }
+                price_per_day_cents: { type: integer }
+                deposit_cents: { type: integer }
+      responses:
+        "201":
+          description: Created
+        "401":
+          description: Authentication required
+
+  /listings/{id}:
+    get:
+      summary: Get listing detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Listing" }
+        "404":
+          description: Not found
+
+  /search:
+    get:
+      summary: Search listings (Elasticsearch via search-indexer, MySQL LIKE fallback on failure)
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: OK
+
+  /bookings:
+    post:
+      summary: Create a booking (atomic transaction; 409 on date overlap)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listing_id, start_date, end_date]
+              properties:
+                listing_id: { type: integer, format: int64 }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "409":
+          description: Listing not available for the requested dates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      summary: List bookings for listings the authenticated user owns
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+
+  /bookings/{id}:
+    get:
+      summary: Get a booking
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "404":
+          description: Not found
+
+  /bookings/{id}/approve:
+    post:
+      summary: Owner approves a requested booking
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+        "409":
+          description: Invalid status transition
+
+  /bookings/{id}/reject:
+    post:
+      summary: Owner rejects a requested booking
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+
+  /bookings/{id}/cancel:
+    post:
+      summary: Cancel a booking
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+
+  /bookings/{id}/activate:
+    post:
+      summary: >
+        Transition an approved booking to active. In a full deployment this
+        fires automatically when the rental's start_date arrives (a
+        scheduler outside this project's scope); exposed manually here so
+        the lifecycle is exercisable end to end.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+
+  /bookings/{id}/dispute:
+    post:
+      summary: >
+        Dispute an active booking and file a damage report. Transitions the
+        booking (MySQL) and, if MongoDB is available, persists the incident
+        write-up there (internal/damagereport) — degrades gracefully to
+        booking-only if Mongo is unreachable.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+                photo_urls:
+                  type: array
+                  items: { type: string, format: uri }
+      responses:
+        "201":
+          description: Created
+
+  /bookings/{id}/complete:
+    post:
+      summary: Mark an active booking completed
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+
+  /bookings/events:
+    get:
+      summary: >
+        Server-Sent Events stream of booking updates for the listings the
+        authenticated owner owns. Access token passed as a query parameter
+        (?access_token=...) since EventSource cannot set custom headers.
+      responses:
+        "200":
+          description: text/event-stream
+
+  /bookings/{id}/poll:
+    get:
+      summary: Long-poll fallback for clients that can't hold SSE/WebSocket open
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: since
+          in: query
+          schema: { type: integer, format: int64, description: "unix millis" }
+      responses:
+        "200":
+          description: OK
+
+  /reviews:
+    post:
+      summary: Leave a review for a completed booking
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [booking_id, rating]
+              properties:
+                booking_id: { type: integer, format: int64 }
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        "201":
+          description: Created
+
+  /categories:
+    get:
+      summary: List gear categories
+      responses:
+        "200":
+          description: OK

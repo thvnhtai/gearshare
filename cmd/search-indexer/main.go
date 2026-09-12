@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/thvnhtai/gearshare/internal/auth"
 	"github.com/thvnhtai/gearshare/internal/eventbus"
 	appmiddleware "github.com/thvnhtai/gearshare/internal/middleware"
+	"github.com/thvnhtai/gearshare/internal/observability"
 )
 
 type listingEvent struct {
@@ -50,6 +52,7 @@ func main() {
 	kafkaBrokers := strings.Split(envOrDefault("KAFKA_BROKERS", "127.0.0.1:9092"), ",")
 	esAddr := envOrDefault("ELASTICSEARCH_ADDR", "http://127.0.0.1:9200")
 	grpcAddr := envOrDefault("GRPC_ADDR", ":9092")
+	metricsAddr := envOrDefault("METRICS_ADDR", ":9102")
 	basicUser := envOrDefault("INTERNAL_BASIC_USER", "admin")
 	basicPass := envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me")
 
@@ -97,6 +100,15 @@ func main() {
 	go func() {
 		if err := bookingConsumer.Run(ctx); err != nil {
 			log.Printf("search-indexer: booking audit consumer stopped: %v", err)
+		}
+	}()
+
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", observability.Handler())
+		log.Printf("search-indexer: metrics listening on %s", metricsAddr)
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Printf("search-indexer: metrics server stopped: %v", err)
 		}
 	}()
 

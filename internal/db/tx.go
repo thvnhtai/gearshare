@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/thvnhtai/gearshare/internal/observability"
 )
 
 // MySQL error 1213 = ER_LOCK_DEADLOCK, 1205 = ER_LOCK_WAIT_TIMEOUT.
@@ -31,6 +33,7 @@ func (d *DB) WithinTransaction(ctx context.Context, fn func(tx *sqlx.Tx) error) 
 	var lastErr error
 	for attempt := 0; attempt < maxTxRetries; attempt++ {
 		if attempt > 0 {
+			observability.BookingTransactionRetries.Inc()
 			backoff := time.Duration(attempt) * 20 * time.Millisecond
 			jitter := time.Duration(rand.Intn(20)) * time.Millisecond
 			time.Sleep(backoff + jitter)

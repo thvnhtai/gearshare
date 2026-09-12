@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +29,7 @@ import (
 
 	gearsharev1 "github.com/thvnhtai/gearshare/api/gen/gearshare/v1"
 	"github.com/thvnhtai/gearshare/internal/auth"
+	"github.com/thvnhtai/gearshare/internal/observability"
 	"github.com/thvnhtai/gearshare/internal/queue"
 )
 
@@ -40,6 +42,7 @@ type emailJob struct {
 func main() {
 	rabbitURL := envOrDefault("RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/")
 	grpcAddr := envOrDefault("GRPC_ADDR", ":9091")
+	metricsAddr := envOrDefault("METRICS_ADDR", ":9101")
 	userServiceAddr := envOrDefault("USER_SERVICE_ADDR", "127.0.0.1:9090")
 	basicUser := envOrDefault("INTERNAL_BASIC_USER", "admin")
 	basicPass := envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me")
@@ -73,6 +76,15 @@ func main() {
 	go func() {
 		if err := consumer.Run(ctx); err != nil {
 			log.Printf("notification-service: consumer stopped: %v", err)
+		}
+	}()
+
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", observability.Handler())
+		log.Printf("notification-service: metrics listening on %s", metricsAddr)
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Printf("notification-service: metrics server stopped: %v", err)
 		}
 	}()
 

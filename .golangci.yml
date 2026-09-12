@@ -1,0 +1,20 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosec
+
+issues:
+  exclude-rules:
+    # internal/httputil/etag.go deliberately uses MD5 for a non-security
+    # content checksum, not a password/token hash — already commented
+    # in-file; silence gosec's blanket "weak crypto" rule for that one line.
+    - path: internal/httputil/etag.go
+      linters: [gosec]
+      text: "G401|G501"

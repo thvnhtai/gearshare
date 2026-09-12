@@ -39,6 +39,7 @@ type Handlers struct {
 	Search   http.HandlerFunc
 	Admin    *AdminHandler
 	Partner  *partner.Handler
+	Dispute  *DisputeHandler
 	OAuth    *user.OAuthHandler // nil when OAuth2/OIDC isn't configured (no client ID/secret)
 	SAML     *auth.SAMLServiceProvider // nil when no IdP metadata URL is configured
 }
@@ -103,7 +104,9 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 			protected.Post("/bookings/{id}/approve", h.Booking.Approve)
 			protected.Post("/bookings/{id}/reject", h.Booking.Reject)
 			protected.Post("/bookings/{id}/cancel", h.Booking.Cancel)
+			protected.Post("/bookings/{id}/activate", h.Booking.Activate)
 			protected.Post("/bookings/{id}/complete", h.Booking.Complete)
+			protected.Post("/bookings/{id}/dispute", h.Dispute.Dispute)
 			protected.Get("/bookings/{id}/poll", h.Polling.Poll)
 
 			protected.Post("/reviews", h.Review.Create)

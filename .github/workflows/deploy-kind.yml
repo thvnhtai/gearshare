@@ -1,0 +1,79 @@
+name: Deploy to kind (smoke test)
+
+# A REAL deploy stage, not a documented-only one: spins up an ephemeral
+# Kubernetes cluster inside the runner, applies the actual manifests under
+# deployments/k8s/base, waits for a real rollout, and curls /healthz
+# through the cluster before tearing everything down. This exact sequence
+# (kind create -> build+load image -> apply -> rollout status -> port-forward
+# curl -> kind delete) was run and verified manually while building this
+# repo; this workflow automates it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: gearshare-ci
+
+      - name: Build api image
+        run: docker build -f deployments/docker/Dockerfile.api -t gearshare/api:latest .
+
+      - name: Load image into kind
+        run: kind load docker-image gearshare/api:latest --name gearshare-ci
+
+      - name: Stand up an ephemeral MySQL for the smoke test
+        run: |
+          kubectl run mysql --image=mysql:8.4 \
+            --env="MYSQL_ROOT_PASSWORD=root_password" \
+            --env="MYSQL_DATABASE=gearshare" --port=3306
+          kubectl expose pod mysql --port=3306 --target-port=3306
+          kubectl wait --for=condition=Ready pod/mysql --timeout=120s
+
+      - name: Apply migrations
+        run: |
+          for f in migrations/mysql/*.up.sql; do
+            kubectl exec -i mysql -- mysql -uroot -proot_password gearshare < "$f"
+          done
+
+      - name: Create secrets pointing at the in-cluster MySQL
+        run: |
+          kubectl create secret generic gearshare-secrets \
+            --from-literal=MYSQL_PRIMARY_DSN="gearshare_app:app_password@tcp(mysql:3306)/gearshare?parseTime=true&multiStatements=true" \
+            --from-literal=MYSQL_REPLICA_DSN="gearshare_app:app_password@tcp(mysql:3306)/gearshare?parseTime=true&multiStatements=true" \
+            --from-literal=JWT_SECRET="ci-test-secret" \
+            --from-literal=SESSION_SECRET="ci-test-secret" \
+            --from-literal=API_KEY_PEPPER="ci-test-secret" \
+            --from-literal=INTERNAL_BASIC_PASS="ci-test-secret"
+
+      - name: Apply GearShare API manifests
+        run: |
+          kubectl apply -f deployments/k8s/base/configmap.yaml
+          kubectl apply -f deployments/k8s/base/api.yaml
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/gearshare-api --timeout=120s
+
+      - name: Smoke test
+        run: |
+          kubectl port-forward svc/gearshare-api 18080:8080 &
+          sleep 5
+          curl -sf http://127.0.0.1:18080/healthz
+          curl -sf http://127.0.0.1:18080/api/v1/categories
+
+      - name: Describe pods on failure
+        if: failure()
+        run: |
+          kubectl get pods -o wide
+          kubectl describe pods
+          kubectl logs -l app=gearshare-api --tail=200

@@ -127,6 +127,10 @@ func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 	h.transitionHandler(func(r *http.Request, id int64) (*Booking, error) { return h.service.Cancel(r.Context(), id) })(w, r)
 }
 
+func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
+	h.transitionHandler(func(r *http.Request, id int64) (*Booking, error) { return h.service.Activate(r.Context(), id) })(w, r)
+}
+
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	h.transitionHandler(func(r *http.Request, id int64) (*Booking, error) { return h.service.Complete(r.Context(), id) })(w, r)
 }

@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gearshare-notification-service
+  labels: { app: gearshare-notification-service }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gearshare-notification-service }
+  template:
+    metadata:
+      labels: { app: gearshare-notification-service }
+    spec:
+      containers:
+        - name: notification-service
+          image: gearshare/notification-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: grpc, containerPort: 9091 }
+            - { name: metrics, containerPort: 9101 }
+          envFrom:
+            - configMapRef: { name: gearshare-config }
+            - secretRef: { name: gearshare-secrets }
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "250m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gearshare-notification-service
+spec:
+  selector: { app: gearshare-notification-service }
+  ports:
+    - { name: grpc, port: 9091, targetPort: 9091 }
+    - { name: metrics, port: 9101, targetPort: 9101 }

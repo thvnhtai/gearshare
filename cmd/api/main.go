@@ -20,10 +20,13 @@ import (
 	"github.com/thvnhtai/gearshare/internal/cache"
 	"github.com/thvnhtai/gearshare/internal/category"
 	"github.com/thvnhtai/gearshare/internal/config"
+	"github.com/thvnhtai/gearshare/internal/damagereport"
 	"github.com/thvnhtai/gearshare/internal/db"
 	"github.com/thvnhtai/gearshare/internal/eventbus"
 	"github.com/thvnhtai/gearshare/internal/listing"
 	appmiddleware "github.com/thvnhtai/gearshare/internal/middleware"
+	gsmongo "github.com/thvnhtai/gearshare/internal/mongo"
+	"github.com/thvnhtai/gearshare/internal/notification"
 	"github.com/thvnhtai/gearshare/internal/observability"
 	"github.com/thvnhtai/gearshare/internal/partner"
 	"github.com/thvnhtai/gearshare/internal/queue"
@@ -39,6 +42,14 @@ type emailQueueAdapter struct{ pub *queue.Publisher }
 
 func (a *emailQueueAdapter) QueueEmail(ctx context.Context, payload []byte) error {
 	return a.pub.Publish(ctx, queue.NotificationsTopology, payload, "application/json")
+}
+
+// syncNotifierAdapter satisfies booking.SyncNotifier over a real
+// notification.GRPCClient, for the one urgent/synchronous path (disputes).
+type syncNotifierAdapter struct{ client *notification.GRPCClient }
+
+func (a *syncNotifierAdapter) SendTransactional(ctx context.Context, userID int64, template string) error {
+	return a.client.SendTransactional(ctx, userID, template, nil)
 }
 
 func main() {
@@ -78,6 +89,20 @@ func main() {
 		log.Printf("cache: redis unavailable, running without cache-aside: %v", err)
 	} else {
 		listingCache = cache.NewListingCache(redisClient, 30*time.Second)
+	}
+
+	// MongoDB: same optional-dependency pattern as Redis/Kafka/RabbitMQ —
+	// nil damageReportRepo makes the dispute endpoint still mark a booking
+	// disputed in MySQL, just without persisting the incident write-up
+	// (internal/app/dispute.go's documented degradation path).
+	var damageReportRepo *damagereport.Repository
+	mongoCtx, mongoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	mongoDB, err := gsmongo.Connect(mongoCtx, cfg.Mongo)
+	mongoCancel()
+	if err != nil {
+		log.Printf("mongo: unavailable, disputes won't persist damage reports: %v", err)
+	} else {
+		damageReportRepo = damagereport.NewRepository(mongoDB)
 	}
 
 	// --- Repositories ---
@@ -131,7 +156,21 @@ func main() {
 	if listingCache != nil {
 		bookingCache = listingCache
 	}
-	bookingService := booking.NewService(bookingRepo, bookingTxRunner, kafkaProducer, bookingCache, emailQueuer)
+	// notification-service's gRPC client, for the synchronous dispute path
+	// (booking.SyncNotifier) — optional, same nil-safe pattern as everything
+	// else above.
+	var syncNotifier booking.SyncNotifier
+	if cfg.GRPC.NotificationAddr != "" {
+		notificationClient, err := notification.NewGRPCClient(cfg.GRPC.NotificationAddr)
+		if err != nil {
+			log.Printf("notification: could not set up sync client: %v", err)
+		} else {
+			defer notificationClient.Close()
+			syncNotifier = &syncNotifierAdapter{client: notificationClient}
+		}
+	}
+
+	bookingService := booking.NewService(bookingRepo, bookingTxRunner, kafkaProducer, bookingCache, emailQueuer, syncNotifier)
 	reviewService := review.NewService(reviewRepo)
 
 	// --- Search: gRPC to search-indexer behind a circuit breaker, MySQL
@@ -153,6 +192,7 @@ func main() {
 	apiKeyManager := auth.NewAPIKeyManager(cfg.Auth.APIKeyPepper)
 	adminHandler := app.NewAdminHandler(sessionManager, userRepo, bcryptHasher, bookingRepo, secureCookies)
 	partnerHandler := partner.NewHandler()
+	disputeHandler := app.NewDisputeHandler(bookingService, damageReportRepo)
 
 	// OAuth2 + OIDC "Log in with Google" — optional at boot like Redis/Kafka/
 	// RabbitMQ above. NewOIDCVerifier does an OIDC discovery HTTP call, so
@@ -207,6 +247,7 @@ func main() {
 		Search:   searchService.Handler,
 		Admin:    adminHandler,
 		Partner:  partnerHandler,
+		Dispute:  disputeHandler,
 		OAuth:    oauthHandler,
 		SAML:     samlSP,
 	}

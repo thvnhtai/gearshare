@@ -34,14 +34,12 @@ test-unit:
 	go test ./... -short
 
 test-integration:
-	docker compose -f docker-compose.test.yml up -d
-	go test ./... -tags=integration -run Integration -v
-	docker compose -f docker-compose.test.yml down -v
+	# Spins up its own MySQL testcontainer per test — just needs a Docker daemon.
+	go test ./... -tags=integration -run TestIntegration -v
 
 test-e2e:
-	docker compose up -d
+	# Also self-contained via testcontainers; no docker-compose stack needed.
 	go test ./test/e2e/... -tags=e2e -v
-	docker compose down
 
 compose-up:
 	docker compose up -d

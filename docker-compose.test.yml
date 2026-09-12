@@ -1,7 +1,12 @@
 name: gearshare-test
 
-# Minimal, isolated stack for integration tests (go test -tags=integration ./...)
-# and CI. Separate ports/volumes from docker-compose.yml so both can run at once.
+# Alternative, standing test stack. `make test-integration`/`test-e2e` use
+# testcontainers-go instead (each test spins up and tears down its own
+# MySQL container automatically — see internal/booking/repository_integration_test.go
+# and test/e2e/booking_flow_test.go), so this file isn't required for that.
+# It's kept for manually poking at an isolated test database, or for a CI
+# setup that prefers one long-lived service container over many short-lived
+# ones. Separate ports/volumes from docker-compose.yml so both can run at once.
 services:
   mysql-test:
     image: mysql:8.4

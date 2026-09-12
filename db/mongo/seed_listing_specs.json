@@ -1,0 +1,35 @@
+[
+  {
+    "listing_id": 1,
+    "category": "camping-hiking",
+    "attributes": {
+      "capacity_persons": 4,
+      "season_rating": "3-season",
+      "packed_weight_kg": 3.2,
+      "waterproof_rating_mm": 3000
+    },
+    "updated_at": { "$date": "2026-01-15T10:00:00Z" }
+  },
+  {
+    "listing_id": 2,
+    "category": "water-sports",
+    "attributes": {
+      "seats": 1,
+      "hull_material": "polyethylene",
+      "length_cm": 366,
+      "max_weight_kg": 120
+    },
+    "updated_at": { "$date": "2026-01-16T09:00:00Z" }
+  },
+  {
+    "listing_id": 3,
+    "category": "photography",
+    "attributes": {
+      "megapixels": 24.2,
+      "lens_mount": "RF",
+      "included_lenses": ["24-70mm f/2.8", "50mm f/1.8"],
+      "sensor_size": "full-frame"
+    },
+    "updated_at": { "$date": "2026-01-17T14:00:00Z" }
+  }
+]

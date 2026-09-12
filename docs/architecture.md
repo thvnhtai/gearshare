@@ -55,7 +55,7 @@ GET  /api/v1/auth/oauth/google (+ /callback)           OAuth2 + OIDC
 GET  /api/v1/listings, /api/v1/listings/{id}           Redis cache-aside + ETag
 POST /api/v1/listings                                  JWT (owner)
 POST /api/v1/bookings                                  JWT — core transactional path
-POST /api/v1/bookings/{id}/approve|reject|cancel|complete
+POST /api/v1/bookings/{id}/approve|reject|cancel|activate|complete|dispute
 GET  /api/v1/bookings                                  JWT — owner's bookings (dashboard initial load)
 GET  /api/v1/bookings/events                           SSE (owner dashboard live feed)
 GET  /api/v1/bookings/{id}/poll                         long-poll fallback

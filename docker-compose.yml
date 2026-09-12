@@ -144,6 +144,12 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "jaeger:4318"
       CORS_ORIGIN: "http://localhost:8081"
       JWT_SECRET: "dev-only-change-me"
+      SESSION_SECRET: "dev-only-change-me"
+      API_KEY_PEPPER: "dev-only-change-me"
+      SEARCH_INDEXER_ADDR: "search-indexer:9092"
+      NOTIFICATION_ADDR: "notification-service:9091"
+      INTERNAL_BASIC_USER: "admin"
+      INTERNAL_BASIC_PASS: "dev-only-change-me"
     ports:
       - "8080:8080"
       - "9090:9090"
@@ -159,6 +165,12 @@ services:
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       GRPC_ADDR: ":9091"
+      METRICS_ADDR: ":9101"
+      USER_SERVICE_ADDR: "api:9090"
+      INTERNAL_BASIC_USER: "admin"
+      INTERNAL_BASIC_PASS: "dev-only-change-me"
+    ports:
+      - "9101:9101"
 
   search-indexer:
     build:
@@ -172,6 +184,21 @@ services:
       KAFKA_BROKERS: "kafka:29092"
       ELASTICSEARCH_ADDR: "http://elasticsearch:9200"
       GRPC_ADDR: ":9092"
+      METRICS_ADDR: ":9102"
+      INTERNAL_BASIC_USER: "admin"
+      INTERNAL_BASIC_PASS: "dev-only-change-me"
+    ports:
+      - "9102:9102"
+
+  thumbnail-fn:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.thumbnail-fn
+    container_name: gearshare-thumbnail-fn
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
 
   nginx:
     image: nginx:1.27-alpine

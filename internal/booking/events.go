@@ -15,6 +15,7 @@ type EventType string
 const (
 	EventBookingCreated   EventType = "BookingCreated"
 	EventBookingApproved  EventType = "BookingApproved"
+	EventBookingActivated EventType = "BookingActivated"
 	EventBookingRejected  EventType = "BookingRejected"
 	EventBookingCancelled EventType = "BookingCancelled"
 	EventBookingCompleted EventType = "BookingCompleted"

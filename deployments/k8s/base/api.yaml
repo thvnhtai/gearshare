@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gearshare-api
+  labels: { app: gearshare-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gearshare-api }
+  template:
+    metadata:
+      labels: { app: gearshare-api }
+    spec:
+      containers:
+        - name: api
+          image: gearshare/api:latest
+          imagePullPolicy: IfNotPresent # local kind/minikube images are loaded directly onto nodes, never pulled from a registry
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: grpc, containerPort: 9090 }
+          envFrom:
+            - configMapRef: { name: gearshare-config }
+            - secretRef: { name: gearshare-secrets }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gearshare-api
+spec:
+  selector: { app: gearshare-api }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+    - { name: grpc, port: 9090, targetPort: 9090 }

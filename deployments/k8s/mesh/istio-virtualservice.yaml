@@ -1,0 +1,48 @@
+# Illustrative only — NOT deployed as part of this project's docker-compose
+# or kind workflows. Standing up a real Istio control plane is
+# disproportionate for a portfolio project (see docs/architecture.md's
+# "architectural patterns" table); this file exists to demonstrate
+# understanding of the service-mesh pattern's shape, not to be `kubectl
+# apply`'d against a cluster without Istio installed.
+#
+# What this WOULD do on an Istio-enabled cluster: route traffic to
+# gearshare-search-indexer through a canary split (90% stable / 10% canary)
+# and apply a mesh-level timeout+retry policy independent of the
+# application-level circuit breaker in internal/middleware/breaker.go —
+# the two are complementary, not redundant: the mesh policy protects every
+# service uniformly at the network layer, while the in-process breaker
+# encodes GearShare-specific fallback behavior (the MySQL LIKE-query
+# degradation path) that only the application itself knows how to do.
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: gearshare-search-indexer
+spec:
+  hosts:
+    - gearshare-search-indexer
+  http:
+    - route:
+        - destination:
+            host: gearshare-search-indexer
+            subset: stable
+          weight: 90
+        - destination:
+            host: gearshare-search-indexer
+            subset: canary
+          weight: 10
+      timeout: 2s
+      retries:
+        attempts: 2
+        perTryTimeout: 1s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: gearshare-search-indexer
+spec:
+  host: gearshare-search-indexer
+  subsets:
+    - name: stable
+      labels: { version: stable }
+    - name: canary
+      labels: { version: canary }

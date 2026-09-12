@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./... -short -race
+
+  # Integration and e2e tests use testcontainers-go, which spins up its own
+  # MySQL container per test — the GitHub-hosted ubuntu-latest runner
+  # already has a Docker daemon available, so no service-container
+  # configuration is needed here.
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go test -tags=integration -run TestIntegration -v ./internal/booking/...
+
+  e2e-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go test -tags=e2e -v ./test/e2e/...
+
+  build-binaries:
+    needs: [unit-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go build -o /dev/null ./cmd/api
+      - run: go build -o /dev/null ./cmd/notification-service
+      - run: go build -o /dev/null ./cmd/search-indexer
+      - run: go build -o /dev/null ./cmd/thumbnail-fn
+      - run: go build -tags lambda -o /dev/null ./cmd/thumbnail-fn

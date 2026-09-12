@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/sony/gobreaker"
+
+	"github.com/thvnhtai/gearshare/internal/observability"
 )
 
 // NewBreaker wraps a downstream call with a circuit breaker: after
@@ -22,6 +24,13 @@ func NewBreaker(name string) *gobreaker.CircuitBreaker {
 		Timeout:     10 * time.Second,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.ConsecutiveFailures >= 3
+		},
+		// Feeds the gearshare_circuit_breaker_state gauge (Grafana panel in
+		// deployments/grafana/dashboards/gearshare-overview.json) — a
+		// breaker sitting open is exactly the kind of thing "monitoring"
+		// (as distinct from mere logging) should surface at a glance.
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			observability.CircuitBreakerState.WithLabelValues(name).Set(float64(to))
 		},
 	})
 }

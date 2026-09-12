@@ -26,6 +26,16 @@ type NotificationQueuer interface {
 	QueueEmail(ctx context.Context, payload []byte) error
 }
 
+// SyncNotifier is the synchronous counterpart to NotificationQueuer,
+// satisfied by a thin adapter over internal/notification.GRPCClient. Used
+// only for the one transition urgent enough to justify a blocking gRPC
+// call in the request path instead of an async queue job: a dispute, where
+// the other party should find out immediately, not whenever
+// notification-service next drains its queue.
+type SyncNotifier interface {
+	SendTransactional(ctx context.Context, userID int64, template string) error
+}
+
 type emailJob struct {
 	BookingID int64  `json:"booking_id"`
 	RenterID  int64  `json:"renter_id"`
@@ -38,10 +48,11 @@ type Service struct {
 	publisher EventPublisher
 	cache     ListingCacheInvalidator
 	notifier  NotificationQueuer
+	sync      SyncNotifier
 }
 
-func NewService(repo *Repository, txRunner *TxRunner, publisher EventPublisher, cache ListingCacheInvalidator, notifier NotificationQueuer) *Service {
-	return &Service{repo: repo, txRunner: txRunner, publisher: publisher, cache: cache, notifier: notifier}
+func NewService(repo *Repository, txRunner *TxRunner, publisher EventPublisher, cache ListingCacheInvalidator, notifier NotificationQueuer, sync SyncNotifier) *Service {
+	return &Service{repo: repo, txRunner: txRunner, publisher: publisher, cache: cache, notifier: notifier, sync: sync}
 }
 
 func (s *Service) queueEmail(ctx context.Context, bookingID, renterID int64, template string) {
@@ -106,6 +117,15 @@ func (s *Service) Cancel(ctx context.Context, bookingID int64) (*Booking, error)
 	return s.transition(ctx, bookingID, StatusCancelled, EventBookingCancelled)
 }
 
+// Activate moves an approved booking into "active" — in a full deployment
+// this would fire automatically when the rental's start_date arrives (a
+// scheduled job outside this reference-depth build's scope), but is also
+// exposed here as a manual transition so the lifecycle is exercisable
+// end-to-end without standing up a scheduler.
+func (s *Service) Activate(ctx context.Context, bookingID int64) (*Booking, error) {
+	return s.transition(ctx, bookingID, StatusActive, EventBookingActivated)
+}
+
 func (s *Service) Complete(ctx context.Context, bookingID int64) (*Booking, error) {
 	return s.transition(ctx, bookingID, StatusCompleted, EventBookingCompleted)
 }
@@ -152,6 +172,11 @@ func (s *Service) transition(ctx context.Context, bookingID int64, to Status, ev
 
 	if template, ok := emailTemplateFor(evtType); ok {
 		s.queueEmail(ctx, b.ID, b.RenterID, template)
+	}
+	if evtType == EventBookingDisputed && s.sync != nil {
+		if err := s.sync.SendTransactional(ctx, b.RenterID, "booking_disputed"); err != nil {
+			fmt.Printf("booking: sync notification failed for booking %d: %v\n", b.ID, err)
+		}
 	}
 	return b, nil
 }

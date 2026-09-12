@@ -1,0 +1,12 @@
+[
+  {
+    "booking_id": 1,
+    "reported_by": 2,
+    "description": "One tent pole arrived with a hairline crack; usable but flagged for the owner.",
+    "photo_urls": [
+      "https://example.com/photos/damage-report-1-a.jpg",
+      "https://example.com/photos/damage-report-1-b.jpg"
+    ],
+    "created_at": { "$date": "2026-02-01T08:30:00Z" }
+  }
+]

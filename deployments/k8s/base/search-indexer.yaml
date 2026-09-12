@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gearshare-search-indexer
+  labels: { app: gearshare-search-indexer }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gearshare-search-indexer }
+  template:
+    metadata:
+      labels: { app: gearshare-search-indexer }
+    spec:
+      containers:
+        - name: search-indexer
+          image: gearshare/search-indexer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: grpc, containerPort: 9092 }
+            - { name: metrics, containerPort: 9102 }
+          envFrom:
+            - configMapRef: { name: gearshare-config }
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "250m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gearshare-search-indexer
+spec:
+  selector: { app: gearshare-search-indexer }
+  ports:
+    - { name: grpc, port: 9092, targetPort: 9092 }
+    - { name: metrics, port: 9102, targetPort: 9102 }

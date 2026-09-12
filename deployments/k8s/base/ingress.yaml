@@ -1,0 +1,27 @@
+# Requires an ingress-nginx controller (kind: `kind create cluster` +
+# `kubectl apply -f https://.../ingress-nginx/.../deploy.yaml`; see
+# .github/workflows/deploy-kind.yml for exactly how CI does it).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gearshare-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false" # TLS termination is handled by the standalone Nginx (deployments/nginx) in this project's design; the ingress controller here just does path routing.
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: gearshare.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: gearshare-api, port: { number: 8080 } }
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service: { name: gearshare-api, port: { number: 8080 } }
+          - path: /partner
+            pathType: Prefix
+            backend:
+              service: { name: gearshare-api, port: { number: 8080 } }
