@@ -35,7 +35,7 @@ func (r *ShardRouter) ShardFor(ownerID int64) int {
 	// deterministic across platforms/architectures.
 	buf := [8]byte{}
 	for i := 0; i < 8; i++ {
-		buf[7-i] = byte(ownerID >> (8 * i))
+		buf[7-i] = byte(ownerID >> (8 * i)) //nolint:gosec // deliberate truncation: extracting one byte at a time to serialize the int64, not a bounds/overflow bug
 	}
 	_, _ = h.Write(buf[:])
 	return int(h.Sum32() % r.shardCount)

@@ -50,7 +50,9 @@ func (h *SSEHandler) BookingEvents(w http.ResponseWriter, r *http.Request) {
 	ch, cancel := h.hub.SubscribeOwner(claims.UserID)
 	defer cancel()
 
-	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	if _, err := fmt.Fprintf(w, "event: connected\ndata: {}\n\n"); err != nil {
+		return // client already gone; nothing left to clean up but return
+	}
 	flusher.Flush()
 
 	for {
@@ -61,7 +63,12 @@ func (h *SSEHandler) BookingEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			fmt.Fprintf(w, "event: booking-update\ndata: %s\n\n", payload)
+			// A write error here means the client disconnected without the
+			// TCP close reaching r.Context().Done() yet (e.g. a dropped
+			// connection) — stop rather than keep flushing into a dead pipe.
+			if _, err := fmt.Fprintf(w, "event: booking-update\ndata: %s\n\n", payload); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}

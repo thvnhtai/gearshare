@@ -28,7 +28,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("thumbnail-fn: connect rabbitmq: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	consumer, err := queue.NewConsumer(conn, queue.MediaTopology, 4, func(ctx context.Context, d amqp.Delivery) error {
 		var req ThumbnailRequest

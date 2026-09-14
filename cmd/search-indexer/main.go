@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	kafka "github.com/segmentio/kafka-go"
 	"google.golang.org/grpc"
@@ -106,8 +107,9 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", observability.Handler())
+		metricsServer := &http.Server{Addr: metricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 		log.Printf("search-indexer: metrics listening on %s", metricsAddr)
-		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+		if err := metricsServer.ListenAndServe(); err != nil {
 			log.Printf("search-indexer: metrics server stopped: %v", err)
 		}
 	}()

@@ -53,7 +53,7 @@ func (idx *Index) EnsureIndex(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("esindex: check index exists: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode == 200 {
 		return nil
 	}
@@ -62,7 +62,7 @@ func (idx *Index) EnsureIndex(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("esindex: create index: %w", err)
 	}
-	defer create.Body.Close()
+	defer func() { _ = create.Body.Close() }()
 	if create.IsError() {
 		return fmt.Errorf("esindex: create index: %s", create.String())
 	}
@@ -85,7 +85,7 @@ func (idx *Index) Upsert(ctx context.Context, doc esDocument) error {
 		if err != nil {
 			return nil, err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if res.IsError() {
 			return nil, fmt.Errorf("esindex: index doc %d: %s", doc.ListingID, res.String())
 		}
@@ -101,7 +101,7 @@ func (idx *Index) Delete(ctx context.Context, listingID int64) error {
 		if err != nil {
 			return nil, err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		return nil, nil
 	})
 	return err
@@ -130,7 +130,7 @@ func (idx *Index) Search(ctx context.Context, query string, limit int) ([]*gears
 		if err != nil {
 			return nil, err
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if res.IsError() {
 			return nil, fmt.Errorf("esindex: search: %s", res.String())
 		}

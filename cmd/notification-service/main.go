@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
@@ -47,11 +48,13 @@ func main() {
 	basicUser := envOrDefault("INTERNAL_BASIC_USER", "admin")
 	basicPass := envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me")
 
-	userConn, err := grpc.NewClient(userServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	userConn, err := grpc.NewClient(userServiceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(auth.BasicAuthClientInterceptor(basicUser, basicPass)))
 	if err != nil {
 		log.Fatalf("notification-service: dial user service: %v", err)
 	}
-	defer userConn.Close()
+	defer func() { _ = userConn.Close() }()
 	userClient := gearsharev1.NewUserInternalServiceClient(userConn)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -61,7 +64,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("notification-service: connect rabbitmq: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	consumer, err := queue.NewConsumer(conn, queue.NotificationsTopology, 10, func(ctx context.Context, d amqp.Delivery) error {
 		var job emailJob
@@ -82,8 +85,12 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", observability.Handler())
+		// ReadHeaderTimeout guards against Slowloris-style connections that
+		// send headers one byte at a time to exhaust server goroutines —
+		// http.ListenAndServe's default has no such timeout.
+		metricsServer := &http.Server{Addr: metricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 		log.Printf("notification-service: metrics listening on %s", metricsAddr)
-		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+		if err := metricsServer.ListenAndServe(); err != nil {
 			log.Printf("notification-service: metrics server stopped: %v", err)
 		}
 	}()

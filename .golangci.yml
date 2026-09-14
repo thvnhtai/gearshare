@@ -1,5 +1,4 @@
-run:
-  timeout: 5m
+version: "2"
 
 linters:
   enable:
@@ -9,12 +8,31 @@ linters:
     - unused
     - ineffassign
     - gosec
-
-issues:
-  exclude-rules:
-    # internal/httputil/etag.go deliberately uses MD5 for a non-security
-    # content checksum, not a password/token hash — already commented
-    # in-file; silence gosec's blanket "weak crypto" rule for that one line.
-    - path: internal/httputil/etag.go
-      linters: [gosec]
-      text: "G401|G501"
+  exclusions:
+    rules:
+      # internal/httputil/etag.go deliberately uses MD5 for a non-security
+      # content checksum, not a password/token hash — already commented
+      # in-file; silence gosec's blanket "weak crypto" rule for that one line.
+      - path: internal/httputil/etag.go
+        linters: [gosec]
+        text: "G401|G501"
+      # G124 false positive: both files DO set Secure/HttpOnly/SameSite on
+      # every cookie, but the Secure value is a parameter (true in
+      # production behind HTTPS-terminating Nginx, false for plain-HTTP
+      # local dev — see docs/security/owasp-top10-mapping.md and each
+      # file's own doc comments), and gosec's static check only recognizes
+      # a literal `true`.
+      - path: internal/auth/(csrf|session_cookie)\.go
+        linters: [gosec]
+        text: "G124"
+      # Same false positive as above: internal/user/oauth_handler.go's
+      # short-lived OAuth state cookie sets HttpOnly/SameSite and a
+      # parameterized Secure — gosec just can't see through the parameter.
+      - path: internal/user/oauth_handler\.go
+        linters: [gosec]
+        text: "G124"
+      # G101 false positive: this is a context-key constant's *name*, not a
+      # credential value.
+      - path: internal/auth/middleware\.go
+        linters: [gosec]
+        text: "G101"

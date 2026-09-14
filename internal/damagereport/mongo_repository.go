@@ -38,7 +38,7 @@ func (r *Repository) ListForBooking(ctx context.Context, bookingID int64) ([]Rep
 	if err != nil {
 		return nil, fmt.Errorf("damagereport: list: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() { _ = cursor.Close(ctx) }()
 
 	var reports []Report
 	if err := cursor.All(ctx, &reports); err != nil {

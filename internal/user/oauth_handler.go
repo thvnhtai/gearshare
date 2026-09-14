@@ -101,6 +101,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Value: "", Path: "/", MaxAge: -1})
+	// Attributes must match the cookie set in Start (HttpOnly/Secure/SameSite)
+	// or some browsers won't recognize this as clearing the same cookie.
+	http.SetCookie(w, &http.Cookie{
+		Name: oauthStateCookie, Value: "", Path: "/", HttpOnly: true,
+		Secure: h.secure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
 	http.Redirect(w, r, h.frontendRedirect+"?access_token="+accessToken, http.StatusFound)
 }

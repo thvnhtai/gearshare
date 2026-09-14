@@ -101,18 +101,10 @@ func (s *FeedServiceOptimized) GetFeed(ctx context.Context, limit, offset int) (
 
 	items := make([]FeedItem, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, FeedItem{
-			ListingID:        r.ListingID,
-			Title:            r.Title,
-			PricePerDayCents: r.PricePerDayCents,
-			DepositCents:     r.DepositCents,
-			OwnerID:          r.OwnerID,
-			OwnerName:        r.OwnerName,
-			CategoryID:       r.CategoryID,
-			CategoryName:     r.CategoryName,
-			ReviewCount:      r.ReviewCount,
-			AvgRating:        r.AvgRating,
-		})
+		// feedRow and FeedItem have identical field names/types/order (one
+		// is the sqlx scan target, the other the JSON response shape) — a
+		// direct conversion instead of a field-by-field literal.
+		items = append(items, FeedItem(r))
 	}
 	return items, nil
 }

@@ -69,9 +69,12 @@ func (m *SessionManager) IssueCookie(w http.ResponseWriter, userID int64, secure
 	})
 }
 
-func (m *SessionManager) ClearCookie(w http.ResponseWriter) {
+// ClearCookie's attributes must match IssueCookie's (HttpOnly/Secure/SameSite)
+// or some browsers won't recognize this as clearing the same cookie.
+func (m *SessionManager) ClearCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name: SessionCookieName, Value: "", Path: "/admin", MaxAge: -1,
+		Name: SessionCookieName, Value: "", Path: "/admin", HttpOnly: true,
+		Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 }
 

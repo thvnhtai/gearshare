@@ -52,13 +52,28 @@ type RouterConfig struct {
 	Sessions          *auth.SessionManager
 	APIKeyRepo        *auth.APIKeyRepository
 	APIKeyManager     *auth.APIKeyManager
+	// AuthRateLimit and APIRateLimit are built in cmd/api/main.go: Redis-
+	// backed (internal/cache.RateLimiter) when Redis is reachable — correct
+	// across the multiple replicas deployments/k8s/base/api.yaml runs —
+	// falling back to internal/middleware.RateLimit's in-process limiter
+	// otherwise. The router itself doesn't need to know which.
+	AuthRateLimit func(http.Handler) http.Handler
+	APIRateLimit  func(http.Handler) http.Handler
 }
 
 func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// ClientIPFromXFFTrustedProxies(1), not the deprecated RealIP: RealIP
+	// blindly trusts the LEFTMOST X-Forwarded-For entry, which is exactly
+	// the client-controlled value an attacker would set to spoof their own
+	// rate-limit/audit-log identity. This app sits behind exactly one
+	// trusted hop in every real deployment (Nginx — deployments/nginx/nginx.conf,
+	// which appends via $proxy_add_x_forwarded_for rather than replacing),
+	// so "skip the last 1 XFF entries, trust the one before that" is the
+	// actual correct trust boundary, not a cosmetic API swap.
+	r.Use(chimiddleware.ClientIPFromXFFTrustedProxies(1))
 	r.Use(chimiddleware.Recoverer)
 	r.Use(appmiddleware.CSP)
 	r.Use(appmiddleware.CORS(cfg.CORSOrigins))
@@ -77,7 +92,7 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	// brute force without punishing normal usage.
 	r.Route("/api/v1/auth", func(authRoutes chi.Router) {
 		authRoutes.Use(chimiddleware.Timeout(30 * time.Second))
-		authRoutes.Use(appmiddleware.RateLimit(20, time.Minute))
+		authRoutes.Use(cfg.AuthRateLimit)
 		authRoutes.Post("/register", h.User.Register)
 		authRoutes.Post("/login", h.User.Login)
 		if h.OAuth != nil {
@@ -96,7 +111,7 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Use(chimiddleware.Timeout(30 * time.Second))
-		v1.Use(appmiddleware.RateLimit(300, time.Minute))
+		v1.Use(cfg.APIRateLimit)
 
 		v1.Get("/categories", h.Category.List)
 		v1.Get("/listings", h.Listing.Feed)

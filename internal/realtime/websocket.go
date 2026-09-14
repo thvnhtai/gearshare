@@ -58,7 +58,7 @@ func (h *WebSocketHandler) ListingAvailability(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return // Upgrade already wrote the error response.
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	blocks, err := h.availability.ListForListing(r.Context(), listingID)
 	if err == nil {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -36,7 +37,7 @@ type SAMLServiceProvider struct {
 // NewSAMLServiceProvider builds the SP from a self-signed cert/key pair
 // (scripts/gen-dev-certs.sh generates one for local use — see
 // deployments/idp/saml/) and the IdP's published metadata URL.
-func NewSAMLServiceProvider(rootURL string, idpMetadataURL string, cert *x509.Certificate, key *rsa.PrivateKey) (*SAMLServiceProvider, error) {
+func NewSAMLServiceProvider(ctx context.Context, rootURL string, idpMetadataURL string, cert *x509.Certificate, key *rsa.PrivateKey) (*SAMLServiceProvider, error) {
 	root, err := url.Parse(rootURL)
 	if err != nil {
 		return nil, fmt.Errorf("saml: parse root url: %w", err)
@@ -46,7 +47,7 @@ func NewSAMLServiceProvider(rootURL string, idpMetadataURL string, cert *x509.Ce
 		return nil, fmt.Errorf("saml: parse idp metadata url: %w", err)
 	}
 
-	idpMetadata, err := samlsp.FetchMetadata(nil, http.DefaultClient, *idpURL)
+	idpMetadata, err := samlsp.FetchMetadata(ctx, http.DefaultClient, *idpURL)
 	if err != nil {
 		return nil, fmt.Errorf("saml: fetch idp metadata: %w", err)
 	}

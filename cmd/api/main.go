@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,6 +59,13 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	// Shared by this process's own gRPC server (app.NewGRPCServer) AND
+	// every outbound internal gRPC client below (search, notification) —
+	// they must agree, or every internal call gets rejected as
+	// Unauthenticated regardless of whether the "password" half is right.
+	internalBasicUser := envOrDefault("INTERNAL_BASIC_USER", "admin")
+	internalBasicPass := envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me")
+
 	shutdownTracing, err := observability.SetupTracing(context.Background(), cfg.OTel)
 	if err != nil {
 		log.Printf("observability: tracing setup failed, continuing without it: %v", err)
@@ -75,7 +83,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Redis is treated as an optional dependency for local dev ergonomics:
 	// if it's unreachable, listingCache stays nil and every cache lookup in
@@ -89,6 +97,20 @@ func main() {
 		log.Printf("cache: redis unavailable, running without cache-aside: %v", err)
 	} else {
 		listingCache = cache.NewListingCache(redisClient, 30*time.Second)
+	}
+
+	// Rate limiting: Redis-backed (correct across the multiple replicas
+	// deployments/k8s/base/api.yaml runs) when Redis is reachable, the
+	// in-process limiter otherwise — same graceful-degradation shape as
+	// everything else keyed off listingCache's success above.
+	var authRateLimit, apiRateLimit func(http.Handler) http.Handler
+	if redisClient != nil {
+		limiter := cache.NewRateLimiter(redisClient)
+		authRateLimit = limiter.Middleware(20, time.Minute, appmiddleware.ResolveClientIP)
+		apiRateLimit = limiter.Middleware(300, time.Minute, appmiddleware.ResolveClientIP)
+	} else {
+		authRateLimit = appmiddleware.RateLimit(20, time.Minute)
+		apiRateLimit = appmiddleware.RateLimit(300, time.Minute)
 	}
 
 	// MongoDB: same optional-dependency pattern as Redis/Kafka/RabbitMQ —
@@ -122,7 +144,7 @@ func main() {
 	// publishEvent) rather than a crash, so `go run ./cmd/api` still works
 	// against a bare MySQL+Redis dev setup with no broker running.
 	kafkaProducer := eventbus.NewKafkaProducer(cfg.Kafka.Brokers)
-	defer kafkaProducer.Close()
+	defer func() { _ = kafkaProducer.Close() }()
 
 	// --- Services ---
 	userService := user.NewService(userRepo, bcryptHasher, jwtIssuer)
@@ -137,12 +159,12 @@ func main() {
 	if err != nil {
 		log.Printf("queue: rabbitmq unavailable, running without email notifications: %v", err)
 	} else {
-		defer rabbitConn.Close()
+		defer func() { _ = rabbitConn.Close() }()
 		publisher, err := queue.NewPublisher(rabbitConn)
 		if err != nil {
 			log.Printf("queue: could not set up publisher: %v", err)
 		} else {
-			defer publisher.Close()
+			defer func() { _ = publisher.Close() }()
 			emailQueuer = &emailQueueAdapter{pub: publisher}
 		}
 	}
@@ -161,11 +183,11 @@ func main() {
 	// else above.
 	var syncNotifier booking.SyncNotifier
 	if cfg.GRPC.NotificationAddr != "" {
-		notificationClient, err := notification.NewGRPCClient(cfg.GRPC.NotificationAddr)
+		notificationClient, err := notification.NewGRPCClient(cfg.GRPC.NotificationAddr, internalBasicUser, internalBasicPass)
 		if err != nil {
 			log.Printf("notification: could not set up sync client: %v", err)
 		} else {
-			defer notificationClient.Close()
+			defer func() { _ = notificationClient.Close() }()
 			syncNotifier = &syncNotifierAdapter{client: notificationClient}
 		}
 	}
@@ -177,7 +199,7 @@ func main() {
 	// LIKE-query fallback on failure/open-breaker (graceful degradation) ---
 	var searchGRPCClient *search.GRPCClient
 	if cfg.GRPC.SearchIndexerAddr != "" {
-		searchGRPCClient, err = search.NewGRPCClient(cfg.GRPC.SearchIndexerAddr)
+		searchGRPCClient, err = search.NewGRPCClient(cfg.GRPC.SearchIndexerAddr, internalBasicUser, internalBasicPass)
 		if err != nil {
 			log.Printf("search: could not set up search-indexer client, falling back to MySQL only: %v", err)
 		}
@@ -220,7 +242,9 @@ func main() {
 		if err != nil {
 			log.Printf("saml: could not generate SP certificate, SAML disabled: %v", err)
 		} else {
-			samlSP, err = auth.NewSAMLServiceProvider("https://localhost", cfg.Auth.SAMLIDPMetadataURL, cert, key)
+			samlCtx, samlCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			samlSP, err = auth.NewSAMLServiceProvider(samlCtx, "https://localhost", cfg.Auth.SAMLIDPMetadataURL, cert, key)
+			samlCancel()
 			if err != nil {
 				log.Printf("saml: could not set up service provider, SAML disabled: %v", err)
 				samlSP = nil
@@ -255,18 +279,18 @@ func main() {
 	router := app.NewRouter(handlers, app.RouterConfig{
 		CORSOrigins:       cfg.HTTP.CORSOrigins,
 		JWTIssuer:         jwtIssuer,
-		InternalBasicUser: envOrDefault("INTERNAL_BASIC_USER", "admin"),
-		InternalBasicPass: envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me"),
+		InternalBasicUser: internalBasicUser,
+		InternalBasicPass: internalBasicPass,
 		Sessions:          sessionManager,
 		APIKeyRepo:        apiKeyRepo,
 		APIKeyManager:     apiKeyManager,
+		AuthRateLimit:     authRateLimit,
+		APIRateLimit:      apiRateLimit,
 	})
 
 	server := app.NewServer(router, cfg.HTTP)
 
-	grpcServer := app.NewGRPCServer(userRepo,
-		envOrDefault("INTERNAL_BASIC_USER", "admin"),
-		envOrDefault("INTERNAL_BASIC_PASS", "dev-only-change-me"))
+	grpcServer := app.NewGRPCServer(userRepo, internalBasicUser, internalBasicPass)
 
 	go func() {
 		if err := server.Start(); err != nil {

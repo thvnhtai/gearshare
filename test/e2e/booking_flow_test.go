@@ -35,6 +35,7 @@ import (
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
 
 	"github.com/thvnhtai/gearshare/internal/app"
+	appmiddleware "github.com/thvnhtai/gearshare/internal/middleware"
 	"github.com/thvnhtai/gearshare/internal/auth"
 	"github.com/thvnhtai/gearshare/internal/availability"
 	"github.com/thvnhtai/gearshare/internal/booking"
@@ -267,6 +268,8 @@ func buildTestServer(database *gsdb.DB) *httptest.Server {
 		Sessions:          sessionManager,
 		APIKeyRepo:        auth.NewAPIKeyRepository(database),
 		APIKeyManager:     auth.NewAPIKeyManager("e2e-test-pepper"),
+		AuthRateLimit:     appmiddleware.RateLimit(20, time.Minute),
+		APIRateLimit:      appmiddleware.RateLimit(300, time.Minute),
 	})
 
 	return httptest.NewServer(router)

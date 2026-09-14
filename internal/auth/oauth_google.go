@@ -80,7 +80,7 @@ func (g *GoogleOAuth) FetchProfile(ctx context.Context, token *oauth2.Token) (*G
 	if err != nil {
 		return nil, fmt.Errorf("oauth: fetch profile: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

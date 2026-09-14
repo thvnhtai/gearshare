@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	gearsharev1 "github.com/thvnhtai/gearshare/api/gen/gearshare/v1"
+	"github.com/thvnhtai/gearshare/internal/auth"
 )
 
 type GRPCClient struct {
@@ -15,8 +16,15 @@ type GRPCClient struct {
 	client gearsharev1.NotificationServiceClient
 }
 
-func NewGRPCClient(addr string) (*GRPCClient, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// NewGRPCClient dials notification-service's NotificationService.
+// basicUser/basicPass must match the credential notification-service's own
+// gRPC server was started with — see internal/search.NewGRPCClient's doc
+// comment for why the client has to attach this explicitly.
+func NewGRPCClient(addr, basicUser, basicPass string) (*GRPCClient, error) {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(auth.BasicAuthClientInterceptor(basicUser, basicPass)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("notification: dial %s: %w", addr, err)
 	}

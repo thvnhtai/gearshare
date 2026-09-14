@@ -35,7 +35,7 @@ func (d *DB) WithinTransaction(ctx context.Context, fn func(tx *sqlx.Tx) error) 
 		if attempt > 0 {
 			observability.BookingTransactionRetries.Inc()
 			backoff := time.Duration(attempt) * 20 * time.Millisecond
-			jitter := time.Duration(rand.Intn(20)) * time.Millisecond
+			jitter := time.Duration(rand.Intn(20)) * time.Millisecond //nolint:gosec // retry-backoff timing jitter, not a security-sensitive value — crypto/rand would be pure overhead here
 			time.Sleep(backoff + jitter)
 		}
 

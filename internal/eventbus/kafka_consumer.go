@@ -44,7 +44,7 @@ func NewConsumer(brokers []string, topic, groupID string, handler Handler) *Cons
 // ctx is cancelled. A handler error is logged, not fatal — see Handler's
 // doc comment on why at-least-once + idempotent consumers make that safe.
 func (c *Consumer) Run(ctx context.Context) error {
-	defer c.reader.Close()
+	defer func() { _ = c.reader.Close() }()
 
 	jobs := make(chan kafka.Message, c.queueDepth)
 	done := make(chan struct{})

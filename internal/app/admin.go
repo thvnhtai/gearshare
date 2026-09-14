@@ -74,7 +74,7 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	h.sessions.ClearCookie(w)
+	h.sessions.ClearCookie(w, h.secureCookies)
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 }
 
