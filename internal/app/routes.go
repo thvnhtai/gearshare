@@ -60,10 +60,15 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Timeout(30 * time.Second))
 	r.Use(appmiddleware.CSP)
 	r.Use(appmiddleware.CORS(cfg.CORSOrigins))
 	r.Use(observability.HTTPMiddleware)
+	// Deliberately NOT a global chimiddleware.Timeout here: it cancels the
+	// request context after the deadline, which internal/realtime/sse.go's
+	// stream loop respects (`case <-r.Context().Done(): return`) — a global
+	// 30s timeout would silently kill every SSE connection every 30
+	// seconds. Applied per-group below instead, only where a bounded
+	// request/response cycle is actually the right model.
 
 	r.Get("/healthz", health.Handler)
 	r.Handle("/metrics", observability.Handler())
@@ -71,6 +76,7 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 	// Auth-rate-limited: 20 attempts/minute/IP guards login/register against
 	// brute force without punishing normal usage.
 	r.Route("/api/v1/auth", func(authRoutes chi.Router) {
+		authRoutes.Use(chimiddleware.Timeout(30 * time.Second))
 		authRoutes.Use(appmiddleware.RateLimit(20, time.Minute))
 		authRoutes.Post("/register", h.User.Register)
 		authRoutes.Post("/login", h.User.Login)
@@ -80,18 +86,22 @@ func NewRouter(h Handlers, cfg RouterConfig) *chi.Mux {
 		}
 	})
 
+	// SSE: registered directly on the root router, NOT nested inside the
+	// /api/v1 group below, specifically so it never picks up that group's
+	// bounded-request Timeout middleware — a long-lived stream and a 30s
+	// request timeout are fundamentally incompatible. EventSource also
+	// can't set an Authorization header, so the handler itself verifies
+	// the access token from the query string instead (web/js/sse.js).
+	r.Get("/api/v1/bookings/events", h.SSE.BookingEvents)
+
 	r.Route("/api/v1", func(v1 chi.Router) {
+		v1.Use(chimiddleware.Timeout(30 * time.Second))
 		v1.Use(appmiddleware.RateLimit(300, time.Minute))
 
 		v1.Get("/categories", h.Category.List)
 		v1.Get("/listings", h.Listing.Feed)
 		v1.Get("/listings/{id}", h.Listing.GetDetail)
 		v1.Get("/search", h.Search)
-
-		// SSE: EventSource can't set an Authorization header, so this route
-		// sits outside the JWT-middleware group — the handler itself
-		// verifies the access token from the query string (web/js/sse.js).
-		v1.Get("/bookings/events", h.SSE.BookingEvents)
 
 		v1.Group(func(protected chi.Router) {
 			protected.Use(auth.RequireJWT(cfg.JWTIssuer))

@@ -6,8 +6,10 @@
 
     const user = window.GearShare.getUser();
     if (user) {
+      const listGearLink = user.role === "owner" ? '<a href="new-listing.html">List gear</a>' : "";
       nav.innerHTML = `
         <a href="index.html">Browse</a>
+        ${listGearLink}
         <a href="dashboard.html">Dashboard</a>
         <span class="muted">${user.display_name} (${user.role})</span>
         <a href="#" id="logout-link">Log out</a>

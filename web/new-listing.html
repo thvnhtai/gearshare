@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GearShare — List Your Gear</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html">🏕️ GearShare</a>
+    <nav class="site-nav" id="site-nav"></nav>
+  </header>
+
+  <main>
+    <div class="card" style="max-width:480px;">
+      <h1>List your gear</h1>
+      <p id="error" class="error-message" hidden></p>
+      <form class="stack" id="listing-form">
+        <div>
+          <label for="category_id">Category</label>
+          <select id="category_id" required></select>
+        </div>
+        <div>
+          <label for="title">Title</label>
+          <input id="title" required maxlength="180" />
+        </div>
+        <div>
+          <label for="description">Description</label>
+          <textarea id="description" rows="4" style="width:100%;padding:0.55rem 0.7rem;border:1px solid var(--color-border);border-radius:6px;font-family:inherit;"></textarea>
+        </div>
+        <div>
+          <label for="price_per_day">Price per day ($)</label>
+          <input id="price_per_day" type="number" min="0.01" step="0.01" required />
+        </div>
+        <div>
+          <label for="deposit">Deposit ($)</label>
+          <input id="deposit" type="number" min="0" step="0.01" value="0" />
+        </div>
+        <button type="submit">Create listing</button>
+      </form>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    GearShareAuth.requireAuth();
+    const user = GearShare.getUser();
+    if (user && user.role !== "owner") {
+      document.querySelector("main").innerHTML =
+        '<p class="error-message">Only owner accounts can list gear. <a href="register.html">Sign up as an owner</a> to list something.</p>';
+    }
+
+    async function loadCategories() {
+      try {
+        const cats = await GearShare.listCategories();
+        const select = document.getElementById("category_id");
+        cats.forEach((c) => {
+          const opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = c.name;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        console.error("failed to load categories", err);
+      }
+    }
+    loadCategories();
+
+    document.getElementById("listing-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = document.getElementById("error");
+      errorBox.hidden = true;
+      try {
+        const listing = await GearShare.createListing({
+          category_id: Number(document.getElementById("category_id").value),
+          title: document.getElementById("title").value,
+          description: document.getElementById("description").value,
+          price_per_day_cents: Math.round(Number(document.getElementById("price_per_day").value) * 100),
+          deposit_cents: Math.round(Number(document.getElementById("deposit").value || 0) * 100),
+        });
+        window.location.href = `listing.html?id=${listing.id}`;
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

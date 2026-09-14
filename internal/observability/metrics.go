@@ -1,6 +1,9 @@
 package observability
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -64,6 +67,33 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// Hijack delegates to the underlying ResponseWriter's http.Hijacker, when
+// it has one. Without this, this middleware being in the global chain
+// silently broke every WebSocket upgrade in the app: gorilla/websocket
+// v1.5.3 does a direct `w.(http.Hijacker)` type assertion (server.go), not
+// the Go 1.20+ http.ResponseController/Unwrap protocol — so wrapping the
+// ResponseWriter in *statusRecorder without an explicit Hijack method hid
+// the underlying Hijacker completely, and every Upgrade() call failed with
+// a bare 500. Found by actually opening the frontend in a browser and
+// watching a real `Upgrade: websocket` handshake fail — curl-only API
+// testing never exercises this path.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("observability: underlying ResponseWriter does not support Hijack")
+	}
+	return hijacker.Hijack()
+}
+
+// Flush lets Server-Sent Events flush each write immediately instead of
+// waiting for Go's HTTP buffering — internal/realtime/sse.go depends on
+// this via http.Flusher just like it depends on Hijack for WebSockets.
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // routePattern falls back to the raw path when chi's route context isn't
