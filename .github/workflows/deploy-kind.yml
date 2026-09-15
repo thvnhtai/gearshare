@@ -43,11 +43,14 @@ jobs:
           # that mysqld has finished its first-boot init (mysqld restarts
           # itself once during that init) and is actually accepting
           # connections — so poll the real thing instead of trusting it.
-          # No --silent: if this still fails, the real error (not just a
-          # bare exit code) needs to show up in the log.
+          # -h127.0.0.1 forces TCP: the mysql:8.4 image's own my.cnf puts
+          # the socket at /var/lib/mysql/mysql.sock, not the client's
+          # compiled-in default of /var/run/mysqld/mysqld.sock, so
+          # socket-based "localhost" connections fail even once mysqld is
+          # genuinely up and TCP-reachable on 3306.
           ok=0
           for i in $(seq 1 60); do
-            if kubectl exec mysql -- mysqladmin ping -uroot -proot_password; then
+            if kubectl exec mysql -- mysqladmin ping -h127.0.0.1 -P3306 -uroot -proot_password; then
               ok=1
               break
             fi
@@ -58,12 +61,11 @@ jobs:
             kubectl logs mysql
             exit 1
           fi
-          kubectl exec mysql -- mysqladmin ping -uroot -proot_password --silent
 
       - name: Apply migrations
         run: |
           for f in migrations/mysql/*.up.sql; do
-            kubectl exec -i mysql -- mysql -uroot -proot_password gearshare < "$f"
+            kubectl exec -i mysql -- mysql -h127.0.0.1 -P3306 -uroot -proot_password gearshare < "$f"
           done
 
       - name: Create secrets pointing at the in-cluster MySQL
