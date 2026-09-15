@@ -1,5 +1,7 @@
 # GearShare
 
+[![CI](https://github.com/thvnhtai/gearshare/actions/workflows/ci.yml/badge.svg)](https://github.com/thvnhtai/gearshare/actions/workflows/ci.yml)
+
 A peer-to-peer outdoor gear rental marketplace — and a reference
 architecture. Every major backend/infrastructure pattern below is real,
 wired code exercised against real MySQL, Redis, Kafka, RabbitMQ,
