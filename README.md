@@ -1,6 +1,7 @@
 # GearShare
 
 [![CI](https://github.com/thvnhtai/gearshare/actions/workflows/ci.yml/badge.svg)](https://github.com/thvnhtai/gearshare/actions/workflows/ci.yml)
+[![Docker Publish](https://github.com/thvnhtai/gearshare/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/thvnhtai/gearshare/actions/workflows/docker-publish.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26.4-00ADD8?logo=go)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
