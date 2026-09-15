@@ -39,6 +39,15 @@ jobs:
             --env="MYSQL_DATABASE=gearshare" --port=3306
           kubectl expose pod mysql --port=3306 --target-port=3306
           kubectl wait --for=condition=Ready pod/mysql --timeout=120s
+          # condition=Ready only means the container process started, not
+          # that mysqld has finished its first-boot init (mysqld restarts
+          # itself once during that init) and is actually accepting
+          # connections — so poll the real thing instead of trusting it.
+          for i in $(seq 1 30); do
+            kubectl exec mysql -- mysqladmin ping -uroot -proot_password --silent && break
+            sleep 2
+          done
+          kubectl exec mysql -- mysqladmin ping -uroot -proot_password --silent
 
       - name: Apply migrations
         run: |
