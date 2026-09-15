@@ -43,10 +43,21 @@ jobs:
           # that mysqld has finished its first-boot init (mysqld restarts
           # itself once during that init) and is actually accepting
           # connections — so poll the real thing instead of trusting it.
-          for i in $(seq 1 30); do
-            kubectl exec mysql -- mysqladmin ping -uroot -proot_password --silent && break
-            sleep 2
+          # No --silent: if this still fails, the real error (not just a
+          # bare exit code) needs to show up in the log.
+          ok=0
+          for i in $(seq 1 60); do
+            if kubectl exec mysql -- mysqladmin ping -uroot -proot_password; then
+              ok=1
+              break
+            fi
+            sleep 3
           done
+          if [ "$ok" -ne 1 ]; then
+            echo "mysqld never became reachable; container logs:"
+            kubectl logs mysql
+            exit 1
+          fi
           kubectl exec mysql -- mysqladmin ping -uroot -proot_password --silent
 
       - name: Apply migrations
